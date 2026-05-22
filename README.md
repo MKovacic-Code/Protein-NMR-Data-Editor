@@ -1,4 +1,4 @@
-# MaKo NMR Data Editor
+# NMR Data Editor
 
 A lightweight Python tool featuring a simple, native system GUI and a headless CLI for batch renumbering residue indices, translating nomenclatures, and applying referencing corrections (offsets) to protein structures, nucleic acids (DNA/RNA), and NMR chemical shift files.
 
