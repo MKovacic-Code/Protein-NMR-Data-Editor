@@ -857,7 +857,7 @@ class RenumberApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Residue Renumbering & Referencing Correction Tool")
-        self.root.geometry("950x800")
+        self.root.geometry("1280x1024")
         
         self.input_files = []
         
@@ -961,21 +961,12 @@ class RenumberApp:
         right_scroll_x.config(command=self.text_preview.xview)
         middle_frame.add(right_lf)
         
-        # Bottom Validation Log Pane
-        bottom_lf = tk.LabelFrame(self.root, text="Validation Log / Alerts", height=120)
-        bottom_lf.pack(fill=tk.X, padx=10, pady=5)
-        
-        log_scroll_y = tk.Scrollbar(bottom_lf)
-        log_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        self.text_log = tk.Text(bottom_lf, height=5, yscrollcommand=log_scroll_y.set)
-        self.text_log.pack(fill=tk.BOTH, expand=True)
-        log_scroll_y.config(command=self.text_log.yview)
-        
         # Action Bar at bottom
         action_frame = tk.Frame(self.root, padx=10, pady=10)
         action_frame.pack(fill=tk.X)
         
         tk.Button(action_frame, text="Process and Save File(s)", command=self.process_files, font=("", 10, "bold"), padx=10).pack(side=tk.LEFT)
+        tk.Button(action_frame, text="Run Validation", command=self.run_validation, font=("", 10, "bold"), padx=10).pack(side=tk.LEFT, padx=(10, 0))
         self.status_label = tk.Label(action_frame, text="Ready", fg="blue")
         self.status_label.pack(side=tk.LEFT, padx=15)
 
@@ -1120,16 +1111,10 @@ class RenumberApp:
             self.text_preview.delete(1.0, tk.END)
             self.text_preview.insert(tk.END, "".join(processed_lines))
             
-            # Populate validation log
-            self.text_log.delete(1.0, tk.END)
             if warnings:
-                self.text_log.insert(tk.END, f"Found {len(warnings)} validation warnings in {os.path.basename(filepath)}:\n")
-                for w in warnings:
-                    self.text_log.insert(tk.END, f" - {w}\n")
+                self.status_label.config(text=f"Loaded preview for {os.path.basename(filepath)} ({len(warnings)} warnings)", fg="orange")
             else:
-                self.text_log.insert(tk.END, "Validation complete: No chemical shift out-of-bounds alerts found.\n")
-                
-            self.status_label.config(text=f"Loaded preview for {os.path.basename(filepath)}", fg="blue")
+                self.status_label.config(text=f"Loaded preview for {os.path.basename(filepath)} (Validation OK)", fg="blue")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to load preview: {str(e)}")
@@ -1157,7 +1142,6 @@ class RenumberApp:
         self.status_label.config(text="Processing...", fg="orange")
         self.root.update()
         
-        self.text_log.delete(1.0, tk.END)
         all_warnings = []
         success_count = 0
         
@@ -1204,21 +1188,112 @@ class RenumberApp:
                     f.writelines(processed_lines)
                 success_count += 1
                 
-            # Log results
-            self.text_log.insert(tk.END, f"Processed {success_count} file(s) successfully.\n")
-            if all_warnings:
-                self.text_log.insert(tk.END, "\nValidation Alerts Log:\n")
-                for fname, warnings in all_warnings:
-                    self.text_log.insert(tk.END, f"[{fname}]\n")
-                    for w in warnings:
-                        self.text_log.insert(tk.END, f"  - {w}\n")
-                        
             self.status_label.config(text=f"Processed {success_count} file(s) successfully.", fg="green")
             messagebox.showinfo("Success", f"Successfully processed {success_count} files.")
             
         except Exception as e:
             self.status_label.config(text="Processing failed.", fg="red")
             messagebox.showerror("Processing Error", f"An error occurred: {str(e)}")
+
+    def run_validation(self):
+        if not self.input_files:
+            messagebox.showwarning("File Error", "Please select input file(s) to validate.")
+            return
+            
+        residue_offset = self.get_offset()
+        if residue_offset is None: return
+        proton_offset = self.get_float_offset(self.offset_h_entry, "Proton Offset")
+        if proton_offset is None: return
+        carbon_offset = self.get_float_offset(self.offset_c_entry, "Carbon Offset")
+        if carbon_offset is None: return
+        nitrogen_offset = self.get_float_offset(self.offset_n_entry, "Nitrogen Offset")
+        if nitrogen_offset is None: return
+        
+        nomenclature_mode = self.nomenclature_combo.get()
+        
+        report_lines = []
+        report_lines.append("=== CHEMICAL SHIFT VALIDATION REPORT ===\n")
+        report_lines.append(f"Residue Offset: {residue_offset}\n")
+        report_lines.append(f"Proton Offset: {proton_offset} ppm\n")
+        report_lines.append(f"Carbon Offset: {carbon_offset} ppm\n")
+        report_lines.append(f"Nitrogen Offset: {nitrogen_offset} ppm\n")
+        report_lines.append(f"Nomenclature Mode: {nomenclature_mode}\n")
+        report_lines.append("=" * 40 + "\n\n")
+        
+        total_warnings = 0
+        for filepath in self.input_files:
+            if not os.path.exists(filepath):
+                report_lines.append(f"File: {os.path.basename(filepath)} - ERROR: File not found.\n\n")
+                continue
+                
+            ftype = self.get_active_format(filepath)
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                
+                warnings = []
+                _ = process_lines(
+                    lines, 
+                    residue_offset, 
+                    proton_offset, 
+                    carbon_offset, 
+                    nitrogen_offset, 
+                    ftype, 
+                    nomenclature_mode, 
+                    warnings
+                )
+                
+                report_lines.append(f"File: {os.path.basename(filepath)} ({ftype.upper()})\n")
+                if warnings:
+                    report_lines.append(f"  Status: Found {len(warnings)} warning(s)\n")
+                    for w in warnings:
+                        report_lines.append(f"    - {w}\n")
+                    total_warnings += len(warnings)
+                else:
+                    report_lines.append("  Status: OK (No out-of-bounds shifts)\n")
+                report_lines.append("\n")
+            except Exception as e:
+                report_lines.append(f"File: {os.path.basename(filepath)} - ERROR: Failed to process. {str(e)}\n\n")
+                
+        report_lines.append("=" * 40 + "\n")
+        report_lines.append(f"Validation finished. Total warnings found: {total_warnings}\n")
+        
+        self.show_validation_report_window("".join(report_lines))
+
+    def show_validation_report_window(self, report_text):
+        report_window = tk.Toplevel(self.root)
+        report_window.title("Validation Report")
+        report_window.geometry("600x500")
+        report_window.minsize(400, 300)
+        
+        # Make it transient to the main window
+        report_window.transient(self.root)
+        
+        # Main layout frame
+        main_frame = tk.Frame(report_window, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Scrollable text pane
+        scroll_y = tk.Scrollbar(main_frame)
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        scroll_x = tk.Scrollbar(main_frame, orient=tk.HORIZONTAL)
+        scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        text_widget = tk.Text(main_frame, wrap=tk.NONE, yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+        text_widget.pack(fill=tk.BOTH, expand=True)
+        scroll_y.config(command=text_widget.yview)
+        scroll_x.config(command=text_widget.xview)
+        
+        # Insert report text and disable editing
+        text_widget.insert(tk.END, report_text)
+        text_widget.config(state=tk.DISABLED)
+        
+        # Button frame
+        btn_frame = tk.Frame(report_window, pady=5)
+        btn_frame.pack(fill=tk.X)
+        
+        close_btn = tk.Button(btn_frame, text="Close", command=report_window.destroy, width=10)
+        close_btn.pack(pady=5)
 
 
 def run_cli():

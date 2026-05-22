@@ -1,4 +1,4 @@
-# MaKo Protein & Nucleic Acid NMR Data Editor
+# MaKo NMR Data Editor
 
 A lightweight Python tool featuring a simple, native system GUI and a headless CLI for batch renumbering residue indices, translating nomenclatures, and applying referencing corrections (offsets) to protein structures, nucleic acids (DNA/RNA), and NMR chemical shift files.
 
@@ -11,8 +11,8 @@ The tool preserves exact file alignment, trailing comments, and column spacing a
 ### 1. Main User Interface (Original vs Modified Preview)
 ![GUI Layout](assets/gui_preview.png)
 
-### 2. Validation Alerts and Out-of-Bounds Logs
-![Validation Alerts](assets/validation_alerts.png)
+### 2. Pop-up Validation Report Window
+The validation results are displayed in a clean, scrollable pop-up window showing any biological out-of-bounds alerts.
 
 ---
 
