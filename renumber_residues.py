@@ -856,7 +856,7 @@ def process_lines(lines, residue_offset, proton_offset, carbon_offset, nitrogen_
 class RenumberApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Residue Renumbering & Referencing Correction Tool")
+        self.root.title("NMR Data Editor")
         self.root.geometry("1280x1024")
         
         self.input_files = []
@@ -1297,7 +1297,7 @@ class RenumberApp:
 
 
 def run_cli():
-    parser = argparse.ArgumentParser(description="Residue Renumberer & Referencing Correction Tool (CLI Mode)")
+    parser = argparse.ArgumentParser(description="NMR Data Editor (CLI Mode)")
     parser.add_argument("-i", "--input", nargs="+", required=True, help="Input file path(s)")
     parser.add_argument("-o", "--output", nargs="+", help="Output file/dir path(s)")
     parser.add_argument("-r", "--residue", type=int, default=0, help="Residue offset (integer)")
