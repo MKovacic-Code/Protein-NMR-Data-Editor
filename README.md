@@ -1,8 +1,18 @@
-# Residue Renumberer & Chemical Shift Referencing Correction Tool
+# MaKo Protein & Nucleic Acid NMR Data Editor
 
-A lightweight Python tool featuring a simple, native system GUI and a headless CLI for batch renumbering residue indices, translating nomenclatures, and applying referencing corrections (offsets) to protein structures and NMR chemical shift files.
+A lightweight Python tool featuring a simple, native system GUI and a headless CLI for batch renumbering residue indices, translating nomenclatures, and applying referencing corrections (offsets) to protein structures, nucleic acids (DNA/RNA), and NMR chemical shift files.
 
 The tool preserves exact file alignment, trailing comments, and column spacing across all operations.
+
+---
+
+## Program Use Case Screenshots
+
+### 1. Main User Interface (Original vs Modified Preview)
+![GUI Layout](assets/gui_preview.png)
+
+### 2. Validation Alerts and Out-of-Bounds Logs
+![Validation Alerts](assets/validation_alerts.png)
 
 ---
 
@@ -11,9 +21,13 @@ The tool preserves exact file alignment, trailing comments, and column spacing a
 - **Native GUI Theme**: Basic, lightweight, and clean system-native theme (no heavy styling or external CSS dependencies) with side-by-side original/modified preview screens.
 - **CLI Mode (Headless)**: Fully featured command-line interface supporting headless automation and scripting pipelines.
 - **Batch Processing**: Select and process multiple files simultaneously, with a dedicated file-selector dropdown in the GUI to preview any file in the queue.
-- **Nomenclature Translation**: Automated mapping between IUPAC and CYANA/DYANA atom naming standards (supporting alpha, beta, and branch-chain protons across standard amino acids).
+- **Nomenclature Translation**:
+  - **Proteins**: Automated mapping between IUPAC and CYANA/DYANA atom naming standards (supporting alpha, beta, and branch-chain protons across standard amino acids).
+  - **Nucleic Acids**: Supports DNA and RNA sugar proton mapping (e.g., IUPAC `H2''` $\leftrightarrow$ CYANA `H2'2`, `H5'` $\leftrightarrow$ `H5'1`, `H5''` $\leftrightarrow$ `H5'2`, DNA-specific `H2'` $\leftrightarrow$ `H2'1`).
 - **Referencing Corrections**: Apply individual chemical shift offsets in ppm for Proton ($^1$H), Carbon ($^{13}$C), and Nitrogen ($^{15}$N).
-- **Out-of-Bounds Validation**: Automatic biological feasibility validation against standard BMRB ranges (warns in GUI logs and CLI if shift values exceed bounds: $^1$H [0-12 ppm], $^{13}$C [10-220 ppm], $^{15}$N [90-140 ppm]).
+- **Out-of-Bounds Validation**: Automatic biological feasibility validation against standard biological bounds:
+  - **Proteins**: $^1$H [0.0 - 12.0 ppm], $^{13}$C [10.0 - 220.0 ppm], $^{15}$N [90.0 - 140.0 ppm].
+  - **Nucleic Acids**: Automatically detected to expand boundaries to accommodate base protons ($^1$H up to 15.0 ppm for imino protons) and base nitrogens ($^{15}$N up to 260.0 ppm) to prevent false alerts.
 - **Alignment-Preserving Spacer**: Dynamically adjusts whitespace padding downstream when token lengths change (e.g. `9` -> `109`) to keep table columns perfectly aligned.
 - **Zero External Dependencies**: Built entirely using Python's standard library (`tkinter`, `argparse`, and `re`).
 
@@ -45,7 +59,8 @@ The tool preserves exact file alignment, trailing comments, and column spacing a
 - Python 3.6 or later.
 
 ### Running the GUI App
-On Windows, you can double-click the `run.bat` script or use the `Residue Renumberer.lnk` shortcut.
+On Windows, you can double-click the `Residue Renumberer.lnk` shortcut to launch the app directly in the background using `pythonw.exe` (with the standard Python logo icon).
+
 Alternatively, launch from your terminal:
 ```bash
 python renumber_residues.py
@@ -70,5 +85,6 @@ python renumber_residues.py -i input1.nef input2.pdb -o ./output_dir -r 100 --pr
 ## Project Structure
 
 - `renumber_residues.py`: Main GUI and CLI script.
-- `run.bat`: Batch script shortcut to launch the app on Windows.
+- `Residue Renumberer.lnk`: Direct Windows shortcut configured to run via `pythonw.exe`.
+- `assets/`: Program screenshots and user interface figures.
 - `README.md`: Project documentation.

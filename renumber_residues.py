@@ -5,9 +5,11 @@ import os
 import sys
 import argparse
 
-# Amino acids pattern for Yasara .tbl fallback parser
+# Amino acids and nucleic acids pattern for Yasara .tbl fallback parser
 AMINO_ACIDS = ["ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE", 
-               "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL", "CA"]
+               "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL", "CA",
+               "DA", "DT", "DG", "DC", "A", "U", "G", "C", "T", "RA", "RU", "RG", "RC",
+               "ADE", "THY", "GUA", "CYT", "URA"]
 AA_PATTERN = "|".join(AMINO_ACIDS)
 FALLBACK_PATTERN1 = re.compile(rf"([ \t]*)\b(\d+) ({AA_PATTERN})\b")
 FALLBACK_PATTERN2 = re.compile(r"\bresid([ \t]+)(\d+)([ \t]*)")
@@ -64,6 +66,61 @@ ONE_TO_THREE = {
 }
 
 
+def is_nucleic_acid(residue_name, atom_name):
+    """
+    Checks if a residue-atom pair is in a nucleic acid context.
+    """
+    res_upper = residue_name.strip().upper() if residue_name else ""
+    atom_upper = atom_name.strip().upper() if atom_name else ""
+    
+    # 1. Uniquely nucleic residue names
+    uniquely_nucleic_res = {
+        "DA", "DT", "DG", "DC", "RA", "RU", "RG", "RC",
+        "ADE", "THY", "GUA", "CYT", "URA", "U"
+    }
+    if res_upper in uniquely_nucleic_res:
+        return True
+        
+    # 2. Check for prime in atom name (sugar atoms)
+    if "'" in atom_upper:
+        return True
+        
+    # 3. Handle ambiguous one-letter codes (A, G, C, T) by checking atom names
+    if res_upper in {"A", "G", "C", "T"}:
+        # Unique sugar and base atoms for nucleic acids
+        nucleic_atoms = {
+            "H8", "H6", "H5", "H2", "H1", "H3", "H21", "H22", "H41", "H42", "H61", "H62",
+            "N9", "N7", "N3", "N1", "O4", "O6", "O2", "P", "OP1", "OP2", "O5'", "O3'", "O4'",
+            "C1'", "C2'", "C3'", "C4'", "C5'", "H1'", "H2'", "H2''", "H3'", "H4'", "H5'", "H5''"
+        }
+        if atom_upper in nucleic_atoms:
+            return True
+        # Regex check for primed atoms or CYANA-style prime notations (like H2'1, H2'2, H5'1, H5'2)
+        if re.search(r"^[C|H|O|N][1-5]'", atom_upper) or re.search(r"^H[25]'[12]$", atom_upper):
+            return True
+            
+    return False
+
+
+def validate_shift(val, element, residue_name, atom_name, line_num, warnings):
+    """
+    Validates chemical shifts against biological bounds, adjusting for protein vs nucleic acid context.
+    """
+    is_nucleic = is_nucleic_acid(residue_name or "", atom_name or "")
+    
+    if element == 'H':
+        max_h = 15.0 if is_nucleic else 12.0
+        if val < 0.0 or val > max_h:
+            warnings.append(f"Line {line_num}: Proton shift {val:.3f} ppm is out of biological bounds (0.0 - {max_h} ppm)")
+    elif element == 'C':
+        if val < 10.0 or val > 220.0:
+            warnings.append(f"Line {line_num}: Carbon shift {val:.3f} ppm is out of biological bounds (10.0 - 220.0 ppm)")
+    elif element == 'N':
+        max_n = 260.0 if is_nucleic else 140.0
+        if val < 90.0 or val > max_n:
+            warnings.append(f"Line {line_num}: Nitrogen shift {val:.3f} ppm is out of biological bounds (90.0 - {max_n} ppm)")
+
+
 def map_atom_name(atom_name, amino_acid, mode):
     """
     Maps atom name between IUPAC and CYANA/DYANA standards.
@@ -73,10 +130,25 @@ def map_atom_name(atom_name, amino_acid, mode):
 
     atom_upper = atom_name.strip().upper()
     aa_upper = amino_acid.strip().upper() if amino_acid else ""
-    if len(aa_upper) == 1:
+    
+    is_nucleic = is_nucleic_acid(aa_upper, atom_upper)
+    
+    if not is_nucleic and len(aa_upper) == 1:
         aa_upper = ONE_TO_THREE.get(aa_upper, aa_upper)
 
     if mode == "IUPAC_TO_CYANA":
+        if is_nucleic:
+            # Sugar proton mappings
+            if atom_upper == "H2''": return "H2'2"
+            elif atom_upper == "H5'": return "H5'1"
+            elif atom_upper == "H5''": return "H5'2"
+            elif atom_upper == "H2'":
+                # Only map H2' to H2'1 if it is DNA context.
+                # RNA has single H2' (so we don't map it to H2'1 if residue starts with 'R' or is 'U')
+                if not (aa_upper.startswith('R') or aa_upper == 'U'):
+                    return "H2'1"
+            return atom_name
+
         # Check amino-acid specific methyls
         if aa_upper == 'ALA' and atom_upper in ['HB1', 'HB2', 'HB3']:
             return 'QB'
@@ -99,6 +171,14 @@ def map_atom_name(atom_name, amino_acid, mode):
         return IUPAC_TO_CYANA.get(atom_upper, atom_name)
 
     elif mode == "CYANA_TO_IUPAC":
+        if is_nucleic:
+            # Sugar proton mappings
+            if atom_upper == "H2'2": return "H2''"
+            elif atom_upper == "H2'1": return "H2'"
+            elif atom_upper == "H5'1": return "H5'"
+            elif atom_upper == "H5'2": return "H5''"
+            return atom_name
+
         # Check amino-acid specific methyls
         if aa_upper == 'ALA':
             if atom_upper in ['QB', 'HB*']:
@@ -326,6 +406,7 @@ def process_talos(lines, residue_offset, proton_offset, carbon_offset, nitrogen_
                     pass
                 elif col_idx in shift_cols:
                     nuc, dec = shift_cols[col_idx]
+                    atom_name = vars_headers[col_idx] if vars_headers and col_idx < len(vars_headers) else ""
                     offset = 0.0
                     if nuc == 'H': offset = proton_offset
                     elif nuc == 'C': offset = carbon_offset
@@ -337,12 +418,7 @@ def process_talos(lines, residue_offset, proton_offset, carbon_offset, nitrogen_
                         new_token = f"{new_val:.{dec}f}"
                         
                         # Validation checks
-                        if nuc == 'H' and (new_val < 0.0 or new_val > 12.0):
-                            warnings.append(f"Line {i+1}: Proton shift {new_val:.3f} ppm is out of biological bounds (0.0 - 12.0 ppm)")
-                        elif nuc == 'C' and (new_val < 10.0 or new_val > 220.0):
-                            warnings.append(f"Line {i+1}: Carbon shift {new_val:.3f} ppm is out of biological bounds (10.0 - 220.0 ppm)")
-                        elif nuc == 'N' and (new_val < 90.0 or new_val > 140.0):
-                            warnings.append(f"Line {i+1}: Nitrogen shift {new_val:.3f} ppm is out of biological bounds (90.0 - 140.0 ppm)")
+                        validate_shift(new_val, nuc, resname, atom_name, i + 1, warnings)
                     except ValueError:
                         pass
                         
@@ -449,21 +525,27 @@ def process_sparky(lines, residue_offset, proton_offset, carbon_offset, nitrogen
                 sub_parts = orig_assign.split(sep)
                 new_sub_parts = []
                 nuclei_types = []
+                sparky_atoms_info = []
                 
                 for part in sub_parts:
                     new_sub_parts.append(process_sparky_assignment_token(part, residue_offset, nomenclature_mode))
                     match = re.match(r'^([A-Za-z]*)(\d+)([A-Za-z0-9#%*]*)$', part)
                     nuc = None
+                    aa = ""
+                    atom = ""
                     if match:
-                        atom = match.group(3).upper()
-                        atom = re.sub(r'[%*xy]$', '', atom)
-                        if atom.startswith('H') or atom.startswith('Q') or atom.startswith('M'):
+                        aa = match.group(1)
+                        atom = match.group(3)
+                        atom_clean = atom.upper()
+                        atom_clean = re.sub(r'[%*xy]$', '', atom_clean)
+                        if atom_clean.startswith('H') or atom_clean.startswith('Q') or atom_clean.startswith('M'):
                             nuc = 'H'
-                        elif atom.startswith('C'):
+                        elif atom_clean.startswith('C'):
                             nuc = 'C'
-                        elif atom.startswith('N'):
+                        elif atom_clean.startswith('N'):
                             nuc = 'N'
                     nuclei_types.append(nuc)
+                    sparky_atoms_info.append((aa, atom))
                     
                 new_assign = sep.join(new_sub_parts)
                 
@@ -500,12 +582,8 @@ def process_sparky(lines, residue_offset, proton_offset, carbon_offset, nitrogen
                                 new_token = f"{new_val:.{decimals}f}"
                                 
                                 # Validation checks
-                                if nuc == 'H' and (new_val < 0.0 or new_val > 12.0):
-                                    warnings.append(f"Line {i+1}: Proton shift {new_val:.3f} ppm is out of biological bounds (0.0 - 12.0 ppm)")
-                                elif nuc == 'C' and (new_val < 10.0 or new_val > 220.0):
-                                    warnings.append(f"Line {i+1}: Carbon shift {new_val:.3f} ppm is out of biological bounds (10.0 - 220.0 ppm)")
-                                elif nuc == 'N' and (new_val < 90.0 or new_val > 140.0):
-                                    warnings.append(f"Line {i+1}: Nitrogen shift {new_val:.3f} ppm is out of biological bounds (90.0 - 140.0 ppm)")
+                                aa, atom = sparky_atoms_info[dim_idx] if dim_idx < len(sparky_atoms_info) else ("", "")
+                                validate_shift(new_val, nuc, aa, atom, i + 1, warnings)
                                     
                                 len_diff_val = len(new_token) - len(val_token)
                                 line_parts[val_part_idx] = new_token
@@ -611,12 +689,11 @@ def process_data_line_tokens(original_line, line_num, mod_cols, residue_offset, 
                     new_token = f"{new_val:.{decimals}f}"
                     
                     # Validation Checks
-                    if element_clean == 'H' and (new_val < 0.0 or new_val > 12.0):
-                        warnings.append(f"Line {line_num}: Proton shift {new_val:.3f} ppm is out of biological bounds (0.0 - 12.0 ppm)")
-                    elif element_clean == 'C' and (new_val < 10.0 or new_val > 220.0):
-                        warnings.append(f"Line {line_num}: Carbon shift {new_val:.3f} ppm is out of biological bounds (10.0 - 220.0 ppm)")
-                    elif element_clean == 'N' and (new_val < 90.0 or new_val > 140.0):
-                        warnings.append(f"Line {line_num}: Nitrogen shift {new_val:.3f} ppm is out of biological bounds (90.0 - 140.0 ppm)")
+                    resname_col = mod.get('resname_col', -1)
+                    resname = ""
+                    if resname_col != -1 and resname_col < len(tokens_info):
+                        resname = tokens_info[resname_col][0]
+                    validate_shift(new_val, element_clean, resname, atom_id, line_num, warnings)
                 except ValueError:
                     new_token = old_token
             else:
@@ -709,7 +786,8 @@ def process_lines(lines, residue_offset, proton_offset, carbon_offset, nitrogen_
                         for idx, h in enumerate(loop_headers):
                             if h.endswith('.atom_name'):
                                 loop_atom_idx = idx
-                        mod_cols[val_idx] = {'type': 'chem_shift', 'el_col': el_idx, 'atom_col': loop_atom_idx}
+                        loop_resname_idx = resname_indices[0] if resname_indices else -1
+                        mod_cols[val_idx] = {'type': 'chem_shift', 'el_col': el_idx, 'atom_col': loop_atom_idx, 'resname_col': loop_resname_idx}
                         
                     for atom_col in atom_indices:
                         suffix = ""
@@ -746,7 +824,7 @@ def process_lines(lines, residue_offset, proton_offset, carbon_offset, nitrogen_
                     for idx in seq_indices:
                         mod_cols[idx] = {'type': 'residue'}
                     if val_idx != -1:
-                        mod_cols[val_idx] = {'type': 'chem_shift', 'el_col': -1, 'atom_col': atom_idx}
+                        mod_cols[val_idx] = {'type': 'chem_shift', 'el_col': -1, 'atom_col': atom_idx, 'resname_col': comp_idx}
                     if atom_idx != -1:
                         mod_cols[atom_idx] = {'type': 'atom_name', 'resname_col': comp_idx}
                 
