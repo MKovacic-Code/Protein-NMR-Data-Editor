@@ -205,6 +205,23 @@ def map_atom_name(atom_name, amino_acid, mode):
     return atom_name
 
 
+def detect_newline_format(filepath):
+    """
+    Detects the newline format of a file.
+    Returns '\r\n' (DOS) or '\n' (Unix).
+    """
+    try:
+        with open(filepath, 'rb') as f:
+            chunk = f.read(4096)
+            if b'\r\n' in chunk:
+                return '\r\n'
+            elif b'\n' in chunk:
+                return '\n'
+    except Exception:
+        pass
+    return '\n'
+
+
 def detect_file_format(filepath):
     """
     Scans the header and first few lines of a file to auto-detect its NMR/biological format.
@@ -907,6 +924,7 @@ class RenumberApp:
         self.offset_n_entry.grid(row=0, column=7, sticky="w", padx=5, pady=5)
         
         # 4. Advanced Settings Panel
+        # 4. Advanced Settings Panel
         settings_frame = tk.Frame(top_frame)
         settings_frame.grid(row=3, column=0, columnspan=3, sticky="we", pady=5)
         
@@ -924,11 +942,22 @@ class RenumberApp:
         self.nomenclature_combo.current(0)
         self.nomenclature_combo.grid(row=0, column=4, sticky="w", padx=5)
         
-        # 5. File preview selector (for batch mode)
+        # New Line Ending controls gridded on row 1
+        tk.Label(settings_frame, text="Line Endings:").grid(row=1, column=0, sticky="w", pady=5)
+        self.newline_combo = ttk.Combobox(settings_frame, values=["Auto (Same as input)", "Unix (LF, \\n)", "DOS/Windows (CRLF, \\r\\n)"], width=22, state="readonly")
+        self.newline_combo.current(0)
+        self.newline_combo.grid(row=1, column=1, columnspan=2, sticky="w", padx=5)
+        self.newline_combo.bind("<<ComboboxSelected>>", lambda e: self.load_preview())
+        
+        tk.Label(settings_frame, text="Detected Endings:").grid(row=1, column=3, sticky="e", padx=(25, 0))
+        self.detected_endings_label = tk.Label(settings_frame, text="N/A", fg="gray", font=("", 9, "bold"))
+        self.detected_endings_label.grid(row=1, column=4, sticky="w", padx=5)
+        
+        # 5. File preview selector (for batch mode) - moved to row 1
         self.preview_label = tk.Label(settings_frame, text="Preview File:")
-        self.preview_label.grid(row=0, column=5, sticky="e", padx=(25, 0))
+        self.preview_label.grid(row=1, column=5, sticky="e", padx=(25, 0))
         self.preview_combo = ttk.Combobox(settings_frame, width=25, state="readonly")
-        self.preview_combo.grid(row=0, column=6, sticky="w", padx=5)
+        self.preview_combo.grid(row=1, column=6, sticky="w", padx=5)
         self.preview_combo.bind("<<ComboboxSelected>>", lambda e: self.load_preview())
         
         tk.Button(top_frame, text="Load Preview", command=self.load_preview).grid(row=3, column=2, sticky="we", pady=5, padx=5)
@@ -1090,6 +1119,12 @@ class RenumberApp:
             ftype = self.get_active_format(filepath)
             nomenclature_mode = self.nomenclature_combo.get()
             
+            detected_nl = detect_newline_format(filepath)
+            if detected_nl == '\r\n':
+                self.detected_endings_label.config(text="DOS (CRLF)", fg="green")
+            else:
+                self.detected_endings_label.config(text="Unix (LF)", fg="blue")
+            
             with open(filepath, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
                 
@@ -1166,6 +1201,15 @@ class RenumberApp:
             for inf, outf in zip(self.input_files, output_paths):
                 ftype = self.get_active_format(inf)
                 
+                detected_newline = detect_newline_format(inf)
+                combo_val = self.newline_combo.get()
+                if "Unix" in combo_val:
+                    target_newline = '\n'
+                elif "DOS" in combo_val:
+                    target_newline = '\r\n'
+                else:
+                    target_newline = detected_newline
+                
                 with open(inf, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
                     
@@ -1184,7 +1228,7 @@ class RenumberApp:
                 if warnings:
                     all_warnings.append((os.path.basename(inf), warnings))
                     
-                with open(outf, 'w', encoding='utf-8') as f:
+                with open(outf, 'w', newline=target_newline, encoding='utf-8') as f:
                     f.writelines(processed_lines)
                 success_count += 1
                 
@@ -1306,6 +1350,7 @@ def run_cli():
     parser.add_argument("--nitrogen", type=float, default=0.0, help="Nitrogen (15N) chemical shift offset (ppm)")
     parser.add_argument("--no-detect", action="store_true", help="Disable automatic format detection and rely on extensions")
     parser.add_argument("-n", "--nomenclature", choices=["NONE", "IUPAC_TO_CYANA", "CYANA_TO_IUPAC"], default="NONE", help="Nomenclature mapping standard")
+    parser.add_argument("--newline", choices=["auto", "unix", "dos", "lf", "crlf"], default="auto", help="Output line endings format (default: auto)")
     
     args = parser.parse_args()
     
@@ -1352,7 +1397,17 @@ def run_cli():
         else:
             ftype = detect_file_format(inf)
             
-        print(f"\nProcessing: {inf} -> {outf} (Format: {ftype.upper()})")
+        detected_newline = detect_newline_format(inf)
+        if args.newline in ("unix", "lf"):
+            target_newline = '\n'
+        elif args.newline in ("dos", "crlf"):
+            target_newline = '\r\n'
+        else:
+            target_newline = detected_newline
+
+        newline_desc = "CRLF (DOS)" if detected_newline == '\r\n' else "LF (Unix)"
+        target_desc = "CRLF (DOS)" if target_newline == '\r\n' else "LF (Unix)"
+        print(f"\nProcessing: {inf} -> {outf} (Format: {ftype.upper()}, Detected Newline: {newline_desc}, Target: {target_desc})")
         
         try:
             with open(inf, 'r', encoding='utf-8') as f:
@@ -1375,7 +1430,7 @@ def run_cli():
                 for w in warnings:
                     print(f"  [WARNING] {w}")
                     
-            with open(outf, 'w', encoding='utf-8') as f:
+            with open(outf, 'w', newline=target_newline, encoding='utf-8') as f:
                 f.writelines(processed)
                 
             print("Completed successfully.")
